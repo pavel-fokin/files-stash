@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -24,7 +25,7 @@ type Config struct {
 
 func New(cfg *Config) *http.Server {
 	// Initialize structured logger with JSON handler
-	logger := slog.New(slog.NewJSONHandler(io.Discard, &slog.HandlerOptions{
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
