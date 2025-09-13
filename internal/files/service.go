@@ -1,6 +1,7 @@
 package files
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -51,7 +52,7 @@ func (s *Service) Upload(req *UploadRequest) (*UploadResult, error) {
 	id := s.generateID()
 
 	// Calculate file size by reading content
-	size, err := s.calculateSize(req.Content)
+	size, data, err := s.calculateSize(req.Content)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate file size: %w", err)
 	}
@@ -68,7 +69,7 @@ func (s *Service) Upload(req *UploadRequest) (*UploadResult, error) {
 	}
 
 	// Save file to storage
-	savedFile, err := s.storage.Save(id, req.Name, req.MimeType, req.Content)
+	savedFile, err := s.storage.Save(id, req.Name, req.MimeType, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("failed to save file: %w", err)
 	}
@@ -148,14 +149,14 @@ func (s *Service) generateID() string {
 }
 
 // calculateSize reads the content to determine file size
-func (s *Service) calculateSize(content io.Reader) (int64, error) {
+func (s *Service) calculateSize(content io.Reader) (int64, []byte, error) {
 	// This is a simplified implementation
 	// In a real scenario, you might want to use a more efficient method
 	data, err := io.ReadAll(content)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	return int64(len(data)), nil
+	return int64(len(data)), data, nil
 }
 
 // generateSignedURL creates a signed URL for file access
