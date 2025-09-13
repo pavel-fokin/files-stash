@@ -14,12 +14,12 @@ import (
 )
 
 type Config struct {
-	AdminToken string        `env:"ADMIN_TOKEN,required"`
-	DataDir    string        `env:"DATA_DIR,required"`
-	HmacKey    string        `env:"HMAC_KEY,required"`
-	MaxSize    int64         `env:"MAX_SIZE,required"`
-	TTL        time.Duration `env:"TTL,required"`
-	DBPath     string        `env:"DB_PATH,required"`
+	AdminToken string        `env:"FILES_STASH_ADMIN_TOKEN,required"`
+	DataDir    string        `env:"FILES_STASH_DATA_DIR,required"`
+	HmacKey    string        `env:"FILES_STASH_HMAC_KEY,required"`
+	MaxSize    int64         `env:"FILES_STASH_MAX_SIZE,required"`
+	TTL        time.Duration `env:"FILES_STASH_TTL,required"`
+	DBPath     string        `env:"FILES_STASH_DB_PATH,required"`
 }
 
 func New(cfg *Config) *http.Server {
