@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -89,6 +91,49 @@ func TestLimitBodyMiddleware(t *testing.T) {
 		handler.ServeHTTP(rr, req)
 		assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
 	})
+}
+
+func TestLoggingMiddleware(t *testing.T) {
+	// Create a buffer to capture log output
+	var logBuffer bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
+
+	// Create a test handler
+	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test response"))
+	})
+
+	// Wrap with logging middleware
+	handler := loggingMiddleware(testHandler)
+
+	// Create test request
+	req, err := http.NewRequest("GET", "/test?param=value", nil)
+	assert.NoError(t, err)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("User-Agent", "test-agent")
+
+	// Execute request
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	// Verify response
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "test response", rr.Body.String())
+
+	// Verify log output
+	logOutput := logBuffer.String()
+	assert.Contains(t, logOutput, `"msg":"HTTP request"`)
+	assert.Contains(t, logOutput, `"method":"GET"`)
+	assert.Contains(t, logOutput, `"path":"/test"`)
+	assert.Contains(t, logOutput, `"query":"param=value"`)
+	assert.Contains(t, logOutput, `"status":200`)
+	assert.Contains(t, logOutput, `"remote_addr":"127.0.0.1:12345"`)
+	assert.Contains(t, logOutput, `"user_agent":"test-agent"`)
+	assert.Contains(t, logOutput, `"duration_ms":`)
 }
 
 func TestNotImplementedHandlers(t *testing.T) {

@@ -3,7 +3,7 @@ package server
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -23,11 +23,18 @@ type Config struct {
 }
 
 func New(cfg *Config) *http.Server {
+	// Initialize structured logger with JSON handler
+	logger := slog.New(slog.NewJSONHandler(io.Discard, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
+
 	// Initialize storage and repository
 	storage := fs.NewStorage(cfg.DataDir)
 	repo, err := sqlite.NewRepository(cfg.DBPath)
 	if err != nil {
-		log.Fatalf("Failed to initialize repository: %v", err)
+		slog.Error("Failed to initialize repository", "error", err)
+		panic(fmt.Sprintf("Failed to initialize repository: %v", err))
 	}
 
 	// Initialize file service
@@ -39,9 +46,12 @@ func New(cfg *Config) *http.Server {
 	mux.HandleFunc("DELETE /v1/files/{id}", auth(cfg.AdminToken, deleteFile(cfg, fileService)))
 	mux.HandleFunc("GET /v1/files/{id}", signedDownload(cfg, fileService))
 
+	// Wrap the handler with logging middleware
+	handler := loggingMiddleware(limitBody(mux, cfg.MaxSize))
+
 	return &http.Server{
 		Addr:         ":8080",
-		Handler:      limitBody(mux, cfg.MaxSize),
+		Handler:      handler,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -79,7 +89,7 @@ func upload(cfg *Config, fileService *files.Service) http.HandlerFunc {
 		// Upload file
 		result, err := fileService.Upload(uploadReq)
 		if err != nil {
-			log.Printf("Upload failed: %v", err)
+			slog.Error("Upload failed", "error", err, "filename", header.Filename)
 			http.Error(w, "Upload failed", http.StatusInternalServerError)
 			return
 		}
@@ -98,12 +108,12 @@ func upload(cfg *Config, fileService *files.Service) http.HandlerFunc {
 func deleteFile(cfg *Config, fileService *files.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		log.Printf("deleting file %s", id)
+		slog.Info("Deleting file", "file_id", id)
 
 		// Delete file
 		err := fileService.Delete(id)
 		if err != nil {
-			log.Printf("Delete failed: %v", err)
+			slog.Error("Delete failed", "error", err, "file_id", id)
 			http.Error(w, "Delete failed", http.StatusInternalServerError)
 			return
 		}
@@ -116,12 +126,12 @@ func signedDownload(cfg *Config, fileService *files.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		signature := r.URL.Query().Get("signature")
-		log.Printf("downloading file %s", id)
+		slog.Info("Downloading file", "file_id", id)
 
 		// Download file with signature verification
 		file, content, err := fileService.Download(id, signature)
 		if err != nil {
-			log.Printf("Download failed: %v", err)
+			slog.Error("Download failed", "error", err, "file_id", id)
 			http.Error(w, "Download failed", http.StatusNotFound)
 			return
 		}
@@ -184,4 +194,42 @@ func limitBody(next http.Handler, maxSize int64) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// loggingMiddleware logs HTTP requests with structured logging
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		// Create a response writer wrapper to capture status code
+		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		// Process the request
+		next.ServeHTTP(wrapped, r)
+
+		// Calculate response time
+		duration := time.Since(start)
+
+		// Log the request with structured data
+		slog.Info("HTTP request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"query", r.URL.RawQuery,
+			"status", wrapped.statusCode,
+			"duration_ms", duration.Milliseconds(),
+			"remote_addr", r.RemoteAddr,
+			"user_agent", r.UserAgent(),
+		)
+	})
+}
+
+// responseWriter wraps http.ResponseWriter to capture status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
 }
