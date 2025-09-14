@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -44,6 +45,7 @@ func New(cfg *Config) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthz)
 	mux.HandleFunc("POST /v1/upload", auth(cfg.AdminToken, upload(cfg, fileService)))
+	mux.HandleFunc("GET /v1/files", auth(cfg.AdminToken, listFiles(cfg, fileService)))
 	mux.HandleFunc("DELETE /v1/files/{id}", auth(cfg.AdminToken, deleteFile(cfg, fileService)))
 	mux.HandleFunc("GET /v1/files/{id}", signedDownload(cfg, fileService))
 
@@ -120,6 +122,31 @@ func deleteFile(cfg *Config, fileService *files.Service) http.HandlerFunc {
 		}
 
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func listFiles(cfg *Config, fileService *files.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		slog.Info("Listing files")
+
+		// Get list of files
+		files, err := fileService.List()
+		if err != nil {
+			slog.Error("List files failed", "error", err)
+			http.Error(w, "Failed to list files", http.StatusInternalServerError)
+			return
+		}
+
+		// Set response headers
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		// Return JSON response
+		if err := json.NewEncoder(w).Encode(files); err != nil {
+			slog.Error("Failed to encode files list", "error", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 

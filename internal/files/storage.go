@@ -41,6 +41,9 @@ type FileRepository interface {
 	// FindByID retrieves file metadata by ID
 	FindByID(id string) (*File, error)
 
+	// List retrieves all file metadata
+	List() ([]*File, error)
+
 	// Delete removes file metadata by ID
 	Delete(id string) error
 

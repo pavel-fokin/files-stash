@@ -107,6 +107,44 @@ func (r *Repository) FindByID(id string) (*files.File, error) {
 	return &file, nil
 }
 
+// List retrieves all file metadata
+func (r *Repository) List() ([]*files.File, error) {
+	query := `
+	SELECT id, name, size, mime_type, created_at, expires_at
+	FROM files
+	ORDER BY created_at DESC
+	`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query files: %w", err)
+	}
+	defer rows.Close()
+
+	var fileList []*files.File
+	for rows.Next() {
+		var file files.File
+		err := rows.Scan(
+			&file.ID,
+			&file.Name,
+			&file.Size,
+			&file.MimeType,
+			&file.CreatedAt,
+			&file.ExpiresAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan file row: %w", err)
+		}
+		fileList = append(fileList, &file)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating file rows: %w", err)
+	}
+
+	return fileList, nil
+}
+
 // Delete removes file metadata by ID
 func (r *Repository) Delete(id string) error {
 	query := `DELETE FROM files WHERE id = ?`

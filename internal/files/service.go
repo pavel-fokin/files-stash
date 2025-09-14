@@ -143,6 +143,29 @@ func (s *Service) Delete(id string) error {
 	return nil
 }
 
+// List retrieves all files
+func (s *Service) List() ([]*File, error) {
+	files, err := s.repo.List()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list files: %w", err)
+	}
+
+	// Filter out expired files
+	var validFiles []*File
+	now := time.Now()
+	for _, file := range files {
+		if now.Before(file.ExpiresAt) {
+			validFiles = append(validFiles, file)
+		} else {
+			// Clean up expired file
+			s.storage.Delete(file.ID)
+			s.repo.Delete(file.ID)
+		}
+	}
+
+	return validFiles, nil
+}
+
 // generateID creates a unique file identifier
 func (s *Service) generateID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
