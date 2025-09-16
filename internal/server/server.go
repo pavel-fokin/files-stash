@@ -44,8 +44,9 @@ func New(cfg *Config) *http.Server {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthz)
-	mux.HandleFunc("POST /v1/upload", auth(cfg.AdminToken, upload(cfg, fileService)))
+	mux.HandleFunc("POST /v1/files", auth(cfg.AdminToken, uploadFile(cfg, fileService)))
 	mux.HandleFunc("GET /v1/files", auth(cfg.AdminToken, listFiles(cfg, fileService)))
+	mux.HandleFunc("GET /v1/files/latest/{tag}", getLatestFileByTag(cfg, fileService))
 	mux.HandleFunc("DELETE /v1/files/{id}", auth(cfg.AdminToken, deleteFile(cfg, fileService)))
 	mux.HandleFunc("GET /v1/files/{id}", signedDownload(cfg, fileService))
 
@@ -65,7 +66,7 @@ func healthz(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func upload(cfg *Config, fileService *files.Service) http.HandlerFunc {
+func uploadFile(cfg *Config, fileService *files.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Parse multipart form
 		err := r.ParseMultipartForm(cfg.MaxSize)
@@ -86,6 +87,7 @@ func upload(cfg *Config, fileService *files.Service) http.HandlerFunc {
 		uploadReq := &files.UploadRequest{
 			Name:     header.Filename,
 			MimeType: header.Header.Get("Content-Type"),
+			Tag:      r.FormValue("tag"),
 			Content:  file,
 		}
 
@@ -100,11 +102,25 @@ func upload(cfg *Config, fileService *files.Service) http.HandlerFunc {
 		// Return success response
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
+		if err := json.NewEncoder(w).Encode(result); err != nil {
+			slog.Error("Failed to encode response", "error", err)
+		}
+	}
+}
 
-		// Simple JSON response
-		response := fmt.Sprintf(`{"id":"%s","name":"%s","size":%d,"mime_type":"%s","url":"%s"}`,
-			result.ID, result.Name, result.Size, result.MimeType, result.URL)
-		w.Write([]byte(response))
+func getLatestFileByTag(cfg *Config, fileService *files.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tag := r.PathValue("tag")
+		slog.Info("Getting latest file by tag", "tag", tag)
+
+		result, err := fileService.GetLatestByTag(tag)
+		if err != nil {
+			slog.Error("Get latest by tag failed", "error", err, "tag", tag)
+			http.Error(w, "Failed to get latest file by tag", http.StatusNotFound)
+			return
+		}
+
+		http.Redirect(w, r, result.URL, http.StatusFound)
 	}
 }
 

@@ -57,32 +57,6 @@ func (s *Storage) Save(id string, name string, mimeType string, content io.Reade
 	}, nil
 }
 
-// Get retrieves a file by ID
-func (s *Storage) Get(id string) (*files.File, error) {
-	filePath := filepath.Join(s.dataDir, id)
-
-	// Check if file exists
-	info, err := os.Stat(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("file not found")
-		}
-		return nil, fmt.Errorf("failed to stat file: %w", err)
-	}
-
-	// Return file metadata
-	// Note: In a real implementation, you might want to store additional metadata
-	// in a separate file or database
-	return &files.File{
-		ID:        id,
-		Name:      info.Name(),
-		Size:      info.Size(),
-		MimeType:  "application/octet-stream", // Default MIME type
-		CreatedAt: info.ModTime(),
-		ExpiresAt: info.ModTime().Add(24 * time.Hour), // Default TTL
-	}, nil
-}
-
 // Delete removes a file by ID
 func (s *Storage) Delete(id string) error {
 	filePath := filepath.Join(s.dataDir, id)
@@ -95,13 +69,6 @@ func (s *Storage) Delete(id string) error {
 	}
 
 	return nil
-}
-
-// Exists checks if a file exists
-func (s *Storage) Exists(id string) bool {
-	filePath := filepath.Join(s.dataDir, id)
-	_, err := os.Stat(filePath)
-	return !os.IsNotExist(err)
 }
 
 // GetContent returns a reader for the file content

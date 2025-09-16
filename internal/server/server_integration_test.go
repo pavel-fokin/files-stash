@@ -64,7 +64,7 @@ func TestIntegration(t *testing.T) {
 		require.NoError(t, err)
 		writer.Close()
 
-		req, err := http.NewRequest("POST", ts.URL+"/v1/upload", body)
+		req, err := http.NewRequest("POST", ts.URL+"/v1/files", body)
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 		req.Header.Set("Authorization", "Bearer "+adminToken)
@@ -112,7 +112,58 @@ func TestIntegration(t *testing.T) {
 		assert.Equal(t, "test file content", string(respBody))
 	})
 
-	// 3. Delete the file
+	// 3. Upload a file with a tag
+	var taggedFileURL string
+	t.Run("Upload with tag", func(t *testing.T) {
+		body := new(bytes.Buffer)
+		writer := multipart.NewWriter(body)
+		part, err := writer.CreateFormFile("file", "test.txt")
+		require.NoError(t, err)
+		_, err = io.WriteString(part, "tagged file content")
+		require.NoError(t, err)
+		writer.WriteField("tag", "latest")
+		writer.Close()
+
+		req, err := http.NewRequest("POST", ts.URL+"/v1/files", body)
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+		var result struct {
+			URL string `json:"url"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		require.NoError(t, err)
+		taggedFileURL = result.URL
+	})
+
+	// 4. Download the tagged file
+	t.Run("Download tagged file", func(t *testing.T) {
+		req, err := http.NewRequest("GET", ts.URL+"/v1/files/latest/latest", nil)
+		require.NoError(t, err)
+
+		// prevent redirects
+		client := &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusFound, resp.StatusCode)
+		assert.Equal(t, taggedFileURL, resp.Header.Get("Location"))
+	})
+
+	// 5. Delete the file
 	t.Run("Delete", func(t *testing.T) {
 		require.NotEmpty(t, fileID, "fileID should not be empty")
 		req, err := http.NewRequest("DELETE", ts.URL+"/v1/files/"+fileID, nil)
@@ -126,7 +177,7 @@ func TestIntegration(t *testing.T) {
 		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 	})
 
-	// 4. Try to download the deleted file
+	// 6. Try to download the deleted file
 	t.Run("Download after delete", func(t *testing.T) {
 		require.NotEmpty(t, fileURL, "fileURL should not be empty")
 		req, err := http.NewRequest("GET", ts.URL+fileURL, nil)

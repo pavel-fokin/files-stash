@@ -32,6 +32,7 @@ func NewService(storage FileStorage, repo FileRepository, hmacKey string, ttl ti
 type UploadRequest struct {
 	Name     string
 	MimeType string
+	Tag      string
 	Content  io.Reader
 }
 
@@ -39,6 +40,7 @@ type UploadRequest struct {
 type UploadResult struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
+	Tag       string    `json:"tag,omitempty"`
 	Size      int64     `json:"size"`
 	MimeType  string    `json:"mime_type"`
 	CreatedAt time.Time `json:"created_at"`
@@ -62,6 +64,7 @@ func (s *Service) Upload(req *UploadRequest) (*UploadResult, error) {
 	file := &File{
 		ID:        id,
 		Name:      req.Name,
+		Tag:       req.Tag,
 		Size:      size,
 		MimeType:  req.MimeType,
 		CreatedAt: now,
@@ -69,7 +72,7 @@ func (s *Service) Upload(req *UploadRequest) (*UploadResult, error) {
 	}
 
 	// Save file to storage
-	savedFile, err := s.storage.Save(id, req.Name, req.MimeType, bytes.NewReader(data))
+	_, err = s.storage.Save(id, req.Name, req.MimeType, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("failed to save file: %w", err)
 	}
@@ -88,12 +91,43 @@ func (s *Service) Upload(req *UploadRequest) (*UploadResult, error) {
 	}
 
 	return &UploadResult{
-		ID:        savedFile.ID,
-		Name:      savedFile.Name,
-		Size:      savedFile.Size,
-		MimeType:  savedFile.MimeType,
-		CreatedAt: savedFile.CreatedAt,
-		ExpiresAt: savedFile.ExpiresAt,
+		ID:        file.ID,
+		Name:      file.Name,
+		Tag:       file.Tag,
+		Size:      file.Size,
+		MimeType:  file.MimeType,
+		CreatedAt: file.CreatedAt,
+		ExpiresAt: file.ExpiresAt,
+		URL:       url,
+	}, nil
+}
+
+// GetLatestByTag retrieves the latest file by tag
+func (s *Service) GetLatestByTag(tag string) (*UploadResult, error) {
+	file, err := s.repo.FindByTag(tag)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find file by tag: %w", err)
+	}
+
+	if time.Now().After(file.ExpiresAt) {
+		s.storage.Delete(file.ID)
+		s.repo.Delete(file.ID)
+		return nil, fmt.Errorf("file has expired")
+	}
+
+	url, err := s.generateSignedURL(file.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate signed URL: %w", err)
+	}
+
+	return &UploadResult{
+		ID:        file.ID,
+		Name:      file.Name,
+		Tag:       file.Tag,
+		Size:      file.Size,
+		MimeType:  file.MimeType,
+		CreatedAt: file.CreatedAt,
+		ExpiresAt: file.ExpiresAt,
 		URL:       url,
 	}, nil
 }

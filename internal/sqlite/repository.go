@@ -3,7 +3,6 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
-	"time"
 
 	"github.com/pavel-fokin/files-stash/internal/files"
 	_ "modernc.org/sqlite"
@@ -43,6 +42,7 @@ func (r *Repository) initSchema() error {
 	CREATE TABLE IF NOT EXISTS files (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
+		tag TEXT,
 		size INTEGER NOT NULL,
 		mime_type TEXT NOT NULL,
 		created_at DATETIME NOT NULL,
@@ -50,6 +50,7 @@ func (r *Repository) initSchema() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_files_expires_at ON files(expires_at);
+	CREATE INDEX IF NOT EXISTS idx_files_tag_created_at ON files(tag, created_at);
 	`
 
 	_, err := r.db.Exec(query)
@@ -59,13 +60,14 @@ func (r *Repository) initSchema() error {
 // Create stores file metadata
 func (r *Repository) Create(file *files.File) error {
 	query := `
-	INSERT INTO files (id, name, size, mime_type, created_at, expires_at)
-	VALUES (?, ?, ?, ?, ?, ?)
+	INSERT INTO files (id, name, tag, size, mime_type, created_at, expires_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
 	_, err := r.db.Exec(query,
 		file.ID,
 		file.Name,
+		file.Tag,
 		file.Size,
 		file.MimeType,
 		file.CreatedAt,
@@ -82,20 +84,25 @@ func (r *Repository) Create(file *files.File) error {
 // FindByID retrieves file metadata by ID
 func (r *Repository) FindByID(id string) (*files.File, error) {
 	query := `
-	SELECT id, name, size, mime_type, created_at, expires_at
+	SELECT id, name, tag, size, mime_type, created_at, expires_at
 	FROM files
 	WHERE id = ?
 	`
 
 	var file files.File
+	var tag sql.NullString
 	err := r.db.QueryRow(query, id).Scan(
 		&file.ID,
 		&file.Name,
+		&tag,
 		&file.Size,
 		&file.MimeType,
 		&file.CreatedAt,
 		&file.ExpiresAt,
 	)
+	if tag.Valid {
+		file.Tag = tag.String
+	}
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -107,10 +114,45 @@ func (r *Repository) FindByID(id string) (*files.File, error) {
 	return &file, nil
 }
 
+// FindByTag retrieves the latest file metadata by tag
+func (r *Repository) FindByTag(tag string) (*files.File, error) {
+	query := `
+	SELECT id, name, tag, size, mime_type, created_at, expires_at
+	FROM files
+	WHERE tag = ?
+	ORDER BY created_at DESC
+	LIMIT 1
+	`
+
+	var file files.File
+	var sqlTag sql.NullString
+	err := r.db.QueryRow(query, tag).Scan(
+		&file.ID,
+		&file.Name,
+		&sqlTag,
+		&file.Size,
+		&file.MimeType,
+		&file.CreatedAt,
+		&file.ExpiresAt,
+	)
+	if sqlTag.Valid {
+		file.Tag = sqlTag.String
+	}
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("file not found")
+		}
+		return nil, fmt.Errorf("failed to find file by tag: %w", err)
+	}
+
+	return &file, nil
+}
+
 // List retrieves all file metadata
 func (r *Repository) List() ([]*files.File, error) {
 	query := `
-	SELECT id, name, size, mime_type, created_at, expires_at
+	SELECT id, name, tag, size, mime_type, created_at, expires_at
 	FROM files
 	ORDER BY created_at DESC
 	`
@@ -124,14 +166,19 @@ func (r *Repository) List() ([]*files.File, error) {
 	var fileList []*files.File
 	for rows.Next() {
 		var file files.File
+		var tag sql.NullString
 		err := rows.Scan(
 			&file.ID,
 			&file.Name,
+			&tag,
 			&file.Size,
 			&file.MimeType,
 			&file.CreatedAt,
 			&file.ExpiresAt,
 		)
+		if tag.Valid {
+			file.Tag = tag.String
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan file row: %w", err)
 		}
@@ -161,19 +208,6 @@ func (r *Repository) Delete(id string) error {
 
 	if rowsAffected == 0 {
 		return fmt.Errorf("file not found")
-	}
-
-	return nil
-}
-
-// CleanupExpired removes expired file metadata
-func (r *Repository) CleanupExpired() error {
-	query := `DELETE FROM files WHERE expires_at < ?`
-
-	now := time.Now()
-	_, err := r.db.Exec(query, now)
-	if err != nil {
-		return fmt.Errorf("failed to cleanup expired files: %w", err)
 	}
 
 	return nil
