@@ -3,6 +3,7 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/pavel-fokin/files-stash/internal/files"
 	_ "modernc.org/sqlite"
@@ -36,25 +37,42 @@ func (r *Repository) Close() error {
 	return r.db.Close()
 }
 
-// initSchema creates the necessary database tables
+// initSchema creates and migrates the necessary database tables
 func (r *Repository) initSchema() error {
-	query := `
+	// Create the table if it doesn't exist, but without the tag column initially
+	// to support migrating from an older schema.
+	createTableQuery := `
 	CREATE TABLE IF NOT EXISTS files (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
-		tag TEXT,
 		size INTEGER NOT NULL,
 		mime_type TEXT NOT NULL,
 		created_at DATETIME NOT NULL,
 		expires_at DATETIME NOT NULL
-	);
+	);`
+	if _, err := r.db.Exec(createTableQuery); err != nil {
+		return fmt.Errorf("failed to create files table: %w", err)
+	}
 
+	// Add the tag column, ignoring the error if it already exists.
+	// This is a simple migration strategy.
+	alterTableQuery := `ALTER TABLE files ADD COLUMN tag TEXT;`
+	if _, err := r.db.Exec(alterTableQuery); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add tag column: %w", err)
+		}
+	}
+
+	// Create indexes, which is safe now that we know the tag column exists.
+	createIndexesQuery := `
 	CREATE INDEX IF NOT EXISTS idx_files_expires_at ON files(expires_at);
 	CREATE INDEX IF NOT EXISTS idx_files_tag_created_at ON files(tag, created_at);
 	`
+	if _, err := r.db.Exec(createIndexesQuery); err != nil {
+		return fmt.Errorf("failed to create indexes: %w", err)
+	}
 
-	_, err := r.db.Exec(query)
-	return err
+	return nil
 }
 
 // Create stores file metadata
